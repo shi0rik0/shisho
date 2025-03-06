@@ -1,6 +1,6 @@
 {
   "name": "@zhangs-org/shisho",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "bin": {
     "shisho": "dist/cli.js"
   },
@@ -20,6 +20,13 @@
   "homepage": "https://github.com/shi0rik0/shisho#readme",
   "description": "",
   "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^22.13.9",
     "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "fs-extra": "^11.3.0",
+    "inquirer": "^12.4.2"
   }
 }

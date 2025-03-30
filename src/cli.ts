@@ -245,8 +245,7 @@ program
     await unlink(path.join(directory, verFile))
 
     const results = await calculateMD5Directory(path.join(directory, 'data'))
-    const content = dumpString(results)
-    await writeFile(path.join(directory, 'md5.txt'), content, 'utf-8')
+    await writeMD5(directory, results)
   })
 
 program

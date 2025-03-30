@@ -27,175 +27,6 @@ function calculateMD5(filePath: string): Promise<string> {
   })
 }
 
-interface FileMD5 {
-  path: string
-  md5: string
-}
-
-async function calculateMD5Directory(dir: string): Promise<FileMD5[]> {
-  async function t(d: string): Promise<FileMD5[]> {
-    const files = await readdir(path.join(dir, d), { withFileTypes: true })
-    const results: FileMD5[] = [] // 用于存储文件路径和 MD5 值的数组
-
-    for (const file of files) {
-      const filePath = path.join(d, file.name)
-
-      if (file.isDirectory()) {
-        const subdirResults = await t(filePath) // 递归调用
-        results.push(...subdirResults) // 合并子目录的结果
-      } else if (file.isFile()) {
-        const md5 = await calculateMD5(path.join(dir, filePath))
-        results.push({ path: filePath, md5 }) // 将结果推入数组
-      }
-    }
-
-    return results // 返回结果数组
-  }
-  return await t('')
-}
-
-const dumpString = (info: FileMD5[]): string => {
-  return info.map(({ path, md5 }) => `${md5} ${path}\n`).join('')
-}
-
-const loadString = (content: string): FileMD5[] => {
-  if (content.endsWith('\n')) {
-    content = content.slice(0, -1)
-  }
-
-  return content.split('\n').map((line) => {
-    const [md5, path] = line.split(' ')
-    return { md5, path }
-  })
-}
-
-// 定义 init 命令
-program
-  .command('init <id> [directory]')
-  .description('Initialize a new directory with the specified ID')
-  .action(async (id, directory = '.') => {
-    console.log(`Initializing directory: ${directory} with ID: ${id}`)
-    const files = await readdir(directory)
-
-    if (files.includes('__SHISHO__')) {
-      console.log('`__SHISHO__` file already exists. Aborted.')
-      return
-    }
-    console.log('About to move these files:')
-    for (const file of files.slice(0, 5)) {
-      console.log(`- ${file}`)
-    }
-    if (files.length > 5) {
-      console.log(`...and ${files.length - 5} more`)
-    }
-    const answers = await inquirer.prompt([
-      {
-        type: 'confirm',
-        name: 'moveOn',
-        message: 'Continue?',
-      },
-    ])
-    if (!answers.moveOn) {
-      console.log('Aborted')
-      return
-    }
-
-    let randomDirName = ''
-    while (true) {
-      randomDirName = 'tmp_' + crypto.randomBytes(4).toString('hex')
-      if (!files.includes(randomDirName)) {
-        break
-      }
-    }
-    const tmpDir = path.join(directory, randomDirName)
-    await ensureDir(tmpDir)
-
-    for (const file of files) {
-      const source = path.join(directory, file)
-      const target = path.join(tmpDir, file)
-      await rename(source, target)
-    }
-
-    const dataDir = path.join(directory, 'data')
-    await rename(tmpDir, dataDir)
-
-    await writeFile(path.join(directory, '__SHISHO__'), '')
-    await writeFile(path.join(directory, `id__${id}`), '')
-    await writeFile(path.join(directory, 'ver__0'), '')
-    console.log('Computing MD5 of files...')
-    const results = await calculateMD5Directory(dataDir)
-    await writeFile(
-      path.join(directory, 'md5.txt'),
-      dumpString(results),
-      'utf-8'
-    )
-  })
-
-const fileMD5ArrayToMap = (info: FileMD5[]): Map<string, string> => {
-  const map = new Map()
-  for (const { path, md5 } of info) {
-    map.set(path, md5)
-  }
-  return map
-}
-
-const isFileMD5ArrayEqual = (info1: FileMD5[], info2: FileMD5[]): boolean => {
-  if (info1.length !== info2.length) {
-    return false
-  }
-  const map1 = fileMD5ArrayToMap(info1)
-  const map2 = fileMD5ArrayToMap(info2)
-  if (map1.size !== map2.size) {
-    return false
-  }
-  for (const [path, md5] of map1) {
-    if (map2.get(path) !== md5) {
-      return false
-    }
-  }
-  return true
-}
-
-// 定义 check 命令
-program
-  .command('check [directory]')
-  .description('Check the specified directory')
-  .action(async (directory = '.') => {
-    console.log(`Checking directory: ${directory}`)
-    const results = await calculateMD5Directory(path.join(directory, 'data'))
-    const content = await readFile(path.join(directory, 'md5.txt'), 'utf-8')
-    const results2 = loadString(content)
-
-    const equal = isFileMD5ArrayEqual(results, results2)
-    console.log(equal ? 'All files are the same' : 'Files are different')
-  })
-
-// 定义 update 命令
-program
-  .command('update [directory]')
-  .description('Update the specified directory')
-  .action(async (directory = '.') => {
-    console.log(`Updating directory: ${directory}`)
-    const files = await readdir(directory)
-    if (!files.includes('__SHISHO__')) {
-      console.log('`__SHISHO__` file does not exist. Aborted.')
-      return
-    }
-    const verFile = files.find((file) => file.startsWith('ver__'))
-    if (!verFile) {
-      console.log('`ver__` file does not exist. Aborted.')
-      return
-    }
-    const version = Number(verFile.slice(5))
-    const newVersion = version + 1
-    await writeFile(path.join(directory, `ver__${newVersion}`), '')
-    await unlink(path.join(directory, verFile))
-
-    const results = await calculateMD5Directory(path.join(directory, 'data'))
-    const content = dumpString(results)
-    await writeFile(path.join(directory, 'md5.txt'), content, 'utf-8')
-  })
-
 const isShishoDir = async (dir: string): Promise<boolean> => {
   const files = await readdir(dir)
   return files.includes('__SHISHO__')
@@ -232,11 +63,192 @@ const getMD5 = async (dir: string): Promise<FileMD5[]> => {
     throw new Error('Not a valid shisho directory')
   }
 
-  const content = await readFile(path.join(dir, 'md5.txt'), 'utf-8')
+  const content = await readFile(
+    path.join(dir, '__SHISHO__', 'md5.txt'),
+    'utf-8'
+  )
   return loadString(content)
 }
 
-// 定义 compare 命令
+interface FileMD5 {
+  path: string
+  md5: string
+}
+
+async function calculateMD5Directory(dir: string): Promise<FileMD5[]> {
+  async function t(d: string): Promise<FileMD5[]> {
+    const files = await readdir(path.join(dir, d), { withFileTypes: true })
+    const results: FileMD5[] = []
+
+    for (const file of files) {
+      const filePath = path.join(d, file.name)
+
+      if (file.isDirectory()) {
+        const subdirResults = await t(filePath)
+        results.push(...subdirResults)
+      } else if (file.isFile()) {
+        const md5 = await calculateMD5(path.join(dir, filePath))
+        results.push({ path: filePath.replace(/\\/g, '/'), md5 })
+      }
+    }
+
+    return results
+  }
+  return await t('')
+}
+
+const dumpString = (info: FileMD5[]): string => {
+  return info.map(({ path, md5 }) => `${md5} ${path}\n`).join('')
+}
+
+const loadString = (content: string): FileMD5[] => {
+  if (content.endsWith('\n')) {
+    content = content.slice(0, -1)
+  }
+
+  return content.split('\n').map((line) => {
+    const parts = line.split(' ')
+    const md5 = parts[0]
+    const path = parts.slice(1).join(' ')
+    return { md5, path }
+  })
+}
+
+const writeMD5 = async (dir: string, info: FileMD5[]): Promise<void> => {
+  const md5Path = path.join(dir, '__SHISHO__/md5.txt')
+  await writeFile(md5Path, dumpString(info), 'utf-8')
+}
+
+program
+  .command('init <id> [directory]')
+  .description('Initialize a new directory with the specified ID')
+  .action(async (id, directory = '.') => {
+    console.log(`Initializing directory: ${directory} with ID: ${id}`)
+    const files = await readdir(directory)
+
+    if (files.includes('__SHISHO__')) {
+      console.log('`__SHISHO__` directory already exists. Aborted.')
+      console.log(
+        'If you want to reinitialize, please delete the `__SHISHO__` directory first.'
+      )
+      return
+    }
+
+    console.log('About to move these files:')
+
+    for (const file of files.slice(0, 5)) {
+      console.log(`- ${file}`)
+    }
+
+    if (files.length > 5) {
+      console.log(`...and ${files.length - 5} more`)
+    }
+
+    const answers = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'moveOn',
+        message: 'Continue?',
+      },
+    ])
+
+    if (!answers.moveOn) {
+      console.log('Aborted')
+      return
+    }
+
+    let randomDirName = ''
+
+    while (true) {
+      randomDirName = 'tmp_' + crypto.randomBytes(4).toString('hex')
+
+      if (!files.includes(randomDirName)) {
+        break
+      }
+    }
+
+    const tmpDir = path.join(directory, randomDirName)
+    await ensureDir(tmpDir)
+
+    for (const file of files) {
+      const source = path.join(directory, file)
+      const target = path.join(tmpDir, file)
+      await rename(source, target)
+    }
+
+    const dataDir = path.join(directory, 'data')
+    await rename(tmpDir, dataDir)
+    const shishoDir = path.join(directory, '__SHISHO__')
+    await ensureDir(shishoDir)
+    await writeFile(path.join(directory, `id__${id}`), '')
+    await writeFile(path.join(directory, 'ver__0'), '')
+    console.log('Computing MD5 of files...')
+    const results = await calculateMD5Directory(dataDir)
+    await writeMD5(directory, results)
+    console.log('MD5 computed and saved to `__SHISHO__/md5.txt`')
+  })
+
+const fileMD5ArrayToMap = (info: FileMD5[]): Map<string, string> => {
+  const map = new Map()
+  for (const { path, md5 } of info) {
+    map.set(path, md5)
+  }
+  return map
+}
+
+const isFileMD5ArrayEqual = (info1: FileMD5[], info2: FileMD5[]): boolean => {
+  if (info1.length !== info2.length) {
+    return false
+  }
+  const map1 = fileMD5ArrayToMap(info1)
+  const map2 = fileMD5ArrayToMap(info2)
+  if (map1.size !== map2.size) {
+    return false
+  }
+  for (const [path, md5] of map1) {
+    if (map2.get(path) !== md5) {
+      return false
+    }
+  }
+  return true
+}
+
+program
+  .command('check [directory]')
+  .description('Check the specified directory')
+  .action(async (directory = '.') => {
+    console.log(`Checking directory: ${directory}`)
+    const results = await calculateMD5Directory(path.join(directory, 'data'))
+    const results2 = await getMD5(directory)
+    const equal = isFileMD5ArrayEqual(results, results2)
+    console.log(equal ? 'All files are the same' : 'Files are different')
+  })
+
+program
+  .command('update [directory]')
+  .description('Update the specified directory')
+  .action(async (directory = '.') => {
+    console.log(`Updating directory: ${directory}`)
+    const files = await readdir(directory)
+    if (!files.includes('__SHISHO__')) {
+      console.log('`__SHISHO__` file does not exist. Aborted.')
+      return
+    }
+    const verFile = files.find((file) => file.startsWith('ver__'))
+    if (!verFile) {
+      console.log('`ver__` file does not exist. Aborted.')
+      return
+    }
+    const version = Number(verFile.slice(5))
+    const newVersion = version + 1
+    await writeFile(path.join(directory, `ver__${newVersion}`), '')
+    await unlink(path.join(directory, verFile))
+
+    const results = await calculateMD5Directory(path.join(directory, 'data'))
+    const content = dumpString(results)
+    await writeFile(path.join(directory, 'md5.txt'), content, 'utf-8')
+  })
+
 program
   .command('compare <dir1> <dir2>')
   .description('Compare two directories')
@@ -268,5 +280,4 @@ program
     console.log('All files are the same')
   })
 
-// 解析命令行参数
 program.parse(process.argv)
